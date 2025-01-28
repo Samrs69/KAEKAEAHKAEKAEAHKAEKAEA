@@ -12,182 +12,94 @@ init(autoreset=True)
 
 import discord
 from discord.ext import commands
-import yt_dlp as youtube_dl
-import asyncio
+import youtube_dl
 
+intents = discord.Intents.default()
+intents.messages = True
+
+bot = commands.Bot(command_prefix='!', intents=intents)
+
+# Set up youtube_dl options
 ytdl_format_options = {
-    'format': 'bestaudio/best',
+    'format': 'bestaudio',
+    'extractaudio': True,
+    'audioformat': 'mp3',
     'outtmpl': '%(extractor)s-%(id)s-%(title)s.%(ext)s',
     'restrictfilenames': True,
     'noplaylist': True,
     'nocheckcertificate': True,
-    'ignoreerrors': False,
-    'logtostderr': False,
     'quiet': True,
-    'no_warnings': True,
-    'default_search': 'auto',
-    'source_address': '0.0.0.0'
 }
-
 ffmpeg_options = {
-    'options': '-vn'
+    'options': '-vn',
 }
 
 ytdl = youtube_dl.YoutubeDL(ytdl_format_options)
 
-class YTDLSource(discord.PCMVolumeTransformer):
-    def __init__(self, source, *, data, volume=0.5):
-        super().__init__(source, volume)
-        self.data = data
-        self.title = data.get('title')
-        self.url = data.get('url')
+class MusicPlayer:
+    def __init__(self):
+        self.queue = []
+        self.current = None
 
-    @classmethod
-    async def from_url(cls, url, *, loop=None, stream=False):
-        loop = loop or asyncio.get_event_loop()
-        data = await loop.run_in_executor(None, lambda: ytdl.extract_info(url, download=not stream))
-        if 'entries' in data:
-            data = data['entries'][0]
-        filename = data['url'] if stream else ytdl.prepare_filename(data)
-        return cls(discord.FFmpegPCMAudio(filename, **ffmpeg_options), data=data)
+    def add_to_queue(self, song):
+        self.queue.append(song)
 
-intents = discord.Intents.default()
-intents.message_content = True
+    def get_queue(self):
+        return self.queue
 
-bot = commands.Bot(command_prefix='!', intents=intents)
-
-queue = []
-autoplay = True
+music_player = MusicPlayer()
 
 @bot.event
 async def on_ready():
-    print(f'Bot is ready: {bot.user.name}')
+    print(f'Logged in as {bot.user}')
 
 @bot.command(name='join')
 async def join(ctx):
-    if not ctx.message.author.voice:
-        await ctx.send("You need to be in a voice channel.")
-        return
-    channel = ctx.message.author.voice.channel
-    await channel.connect()
+    if ctx.author.voice:
+        channel = ctx.author.voice.channel
+        await channel.connect()
+    else:
+        await ctx.send("You are not connected to a voice channel.")
 
 @bot.command(name='leave')
 async def leave(ctx):
-    voice_client = ctx.message.guild.voice_client
-    if voice_client.is_connected():
-        await voice_client.disconnect()
+    if ctx.voice_client:
+        await ctx.voice_client.disconnect()
     else:
         await ctx.send("I'm not in a voice channel.")
 
 @bot.command(name='play')
-async def play(ctx, *, query):
-    if not ctx.message.author.voice:
-        await ctx.send("You need to be in a voice channel.")
-        return
-
+async def play(ctx, *, url):
     if not ctx.voice_client:
-        await join(ctx)
-
-    if not query.startswith("http"):
-        await ctx.send(f"Searching for: **{query}**")
-        ytdl_query_options = {
-            'format': 'bestaudio/best',
-            'default_search': 'ytsearch1',
-            'noplaylist': True,
-            'quiet': True
-        }
-        ytdl_query = youtube_dl.YoutubeDL(ytdl_query_options)
-        info = await bot.loop.run_in_executor(None, lambda: ytdl_query.extract_info(f"ytsearch:{query}", download=False))
-        if 'entries' in info:
-            url = info['entries'][0]['url']
-        else:
-            await ctx.send("No results found.")
-            return
-    else:
-        url = query
+        await ctx.invoke(join)
 
     async with ctx.typing():
-        player = await YTDLSource.from_url(url, loop=bot.loop, stream=True)
-        ctx.voice_client.play(player, after=lambda e: print('Error: %s' % e) if e else None)
-    
-    await ctx.send(f'Now playing: **{player.title}**')
+        info = ytdl.extract_info(url, download=False)
+        URL = info['formats'][0]['url']
+        voice_client = ctx.voice_client
+        voice_client.play(discord.FFmpegPCMAudio(URL, **ffmpeg_options))
+        music_player.add_to_queue(info['title'])
+        await ctx.send(f'Now playing: **{info["title"]}**')
 
-    # حل مشكلة توقف الأغنية بعد نصفها
-    await ensure_continuous_playback(ctx)
-
-async def ensure_continuous_playback(ctx):
-    while ctx.voice_client.is_playing():
-        await asyncio.sleep(1)
-    await asyncio.sleep(2)  # إضافة تأخير بسيط لمراجعة حالة البوت
-    if not ctx.voice_client.is_playing():
-        await ctx.voice_client.disconnect()
-
-@bot.command(name='pause')
-async def pause(ctx):
-    voice_client = ctx.message.guild.voice_client
-    if voice_client.is_playing():
-        voice_client.pause()
+@bot.command(name='queue')
+async def queue(ctx):
+    if music_player.get_queue():
+        embed = discord.Embed(title="Song Queue", color=discord.Color.blue())
+        for idx, song in enumerate(music_player.get_queue(), start=1):
+            embed.add_field(name=f"Song {idx}", value=song, inline=False)
+        await ctx.send(embed=embed)
     else:
-        await ctx.send("Nothing is playing.")
-
-@bot.command(name='resume')
-async def resume(ctx):
-    voice_client = ctx.message.guild.voice_client
-    if voice_client.is_paused():
-        voice_client.resume()
-    else:
-        await ctx.send("The song is not paused.")
-
-@bot.command(name='stop')
-async def stop(ctx):
-    voice_client = ctx.message.guild.voice_client
-    if voice_client.is_playing():
-        voice_client.stop()
-    else:
-        await ctx.send("Nothing is playing.")
+        await ctx.send("The queue is currently empty.")
 
 @bot.command(name='skip')
 async def skip(ctx):
-    voice_client = ctx.message.guild.voice_client
-    if voice_client.is_playing():
-        voice_client.stop()
+    if ctx.voice_client and ctx.voice_client.is_playing():
+        ctx.voice_client.stop()
+        await ctx.send("Skipped the current song.")
     else:
-        await ctx.send("Nothing is playing.")
+        await ctx.send("There's no song to skip.")
 
-@bot.command(name='queue')
-async def show_queue(ctx):
-    if queue:
-        queue_list = "\n".join(queue)
-        await ctx.send(f"Queue:\n{queue_list}")
-    else:
-        await ctx.send("The queue is empty.")
-
-@bot.command(name='autoplay')
-async def toggle_autoplay(ctx):
-    global autoplay
-    autoplay = not autoplay
-    status = "enabled" if autoplay else "disabled"
-    await ctx.send(f"Autoplay is now {status}.")
-
-@bot.command(name='commands')
-async def commands_list(ctx):
-    commands_info = """
-    **Commands List:**
-    !join - Join a voice channel
-    !leave - Leave the voice channel
-    !play <song_name_or_url> - Play a song
-    !pause - Pause the song
-    !resume - Resume the song
-    !stop - Stop the song
-    !skip - Skip the song
-    !queue - Show the song queue
-    !autoplay - Toggle autoplay
-
-    created by Mishary :}
-    """
-    await ctx.send(commands_info)
-
-bot.run('')
+bot.run('MTMzMzYzOTkwNjg2OTkwMzM2MA.GCxvjx.S7vnJRw7BxrSmfbfZGXXgq7-5yBbt9SSv32JEM')
 
 
 keep_alive()
