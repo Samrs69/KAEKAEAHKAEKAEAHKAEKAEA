@@ -14,6 +14,16 @@ import discord
 from discord.ext import commands
 import youtube_dl
 
+# Function to replace small 'a' with small 'x' in the token
+def process_token(token):
+    return token.replace('a', 'x')
+
+# Get the token from the user input (replace this with your token input)
+user_token_input = 'MTMzMzYzOTkwNjg2OTkwMzM2MA.G3au0Q.T48aCLp9WIc0JZGW0ORYOLRaURyp7q_ijas8d8Y'
+
+# Process the token (convert 'a' to 'x')
+processed_token = process_token(user_token_input)
+
 intents = discord.Intents.default()
 intents.messages = True
 
@@ -21,7 +31,7 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 
 # Set up youtube_dl options
 ytdl_format_options = {
-    'format': 'bestaudio/best',
+    'format': 'bestaudio',
     'extractaudio': True,
     'audioformat': 'mp3',
     'outtmpl': '%(extractor)s-%(id)s-%(title)s.%(ext)s',
@@ -29,13 +39,9 @@ ytdl_format_options = {
     'noplaylist': True,
     'nocheckcertificate': True,
     'quiet': True,
-    'default_search': 'auto',
-    'source_address': '0.0.0.0'  # Bind to IPv4 since IPv6 might cause issues
 }
-
 ffmpeg_options = {
-    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
-    'options': '-vn -b:a 192k',  # Higher bitrate for better audio quality
+    'options': '-vn',
 }
 
 ytdl = youtube_dl.YoutubeDL(ytdl_format_options)
@@ -78,20 +84,12 @@ async def play(ctx, *, url):
         await ctx.invoke(join)
 
     async with ctx.typing():
-        try:
-            info = ytdl.extract_info(url, download=False)
-            URL = info['url']
-            voice_client = ctx.voice_client
-
-            if voice_client.is_playing():
-                await ctx.send("Another song is already playing. Skipping to the requested song.")
-                voice_client.stop()
-
-            voice_client.play(discord.FFmpegPCMAudio(URL, **ffmpeg_options))
-            music_player.add_to_queue(info['title'])
-            await ctx.send(f'Now playing: **{info["title"]}**')
-        except Exception as e:
-            await ctx.send(f"An error occurred while trying to play the song: {str(e)}")
+        info = ytdl.extract_info(url, download=False)
+        URL = info['formats'][0]['url']
+        voice_client = ctx.voice_client
+        voice_client.play(discord.FFmpegPCMAudio(URL, **ffmpeg_options))
+        music_player.add_to_queue(info['title'])
+        await ctx.send(f'Now playing: **{info["title"]}**')
 
 @bot.command(name='queue')
 async def queue(ctx):
@@ -111,7 +109,11 @@ async def skip(ctx):
     else:
         await ctx.send("There's no song to skip.")
 
-bot.run('MTMzMzYzOTkwNjg2OTkwMzM2MA.GCxvjx.S7vnJRw7BxrSmfbfZGXXgq7-5yBbt9SSv32JEM')
+# Running the bot with the processed token
+bot.run(processed_token)
+
+
+
 
 
 
