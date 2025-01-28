@@ -21,7 +21,7 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 
 # Set up youtube_dl options
 ytdl_format_options = {
-    'format': 'bestaudio',
+    'format': 'bestaudio/best',
     'extractaudio': True,
     'audioformat': 'mp3',
     'outtmpl': '%(extractor)s-%(id)s-%(title)s.%(ext)s',
@@ -29,9 +29,13 @@ ytdl_format_options = {
     'noplaylist': True,
     'nocheckcertificate': True,
     'quiet': True,
+    'default_search': 'auto',
+    'source_address': '0.0.0.0'  # Bind to IPv4 since IPv6 might cause issues
 }
+
 ffmpeg_options = {
-    'options': '-vn',
+    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
+    'options': '-vn -b:a 192k',  # Higher bitrate for better audio quality
 }
 
 ytdl = youtube_dl.YoutubeDL(ytdl_format_options)
@@ -74,12 +78,20 @@ async def play(ctx, *, url):
         await ctx.invoke(join)
 
     async with ctx.typing():
-        info = ytdl.extract_info(url, download=False)
-        URL = info['formats'][0]['url']
-        voice_client = ctx.voice_client
-        voice_client.play(discord.FFmpegPCMAudio(URL, **ffmpeg_options))
-        music_player.add_to_queue(info['title'])
-        await ctx.send(f'Now playing: **{info["title"]}**')
+        try:
+            info = ytdl.extract_info(url, download=False)
+            URL = info['url']
+            voice_client = ctx.voice_client
+
+            if voice_client.is_playing():
+                await ctx.send("Another song is already playing. Skipping to the requested song.")
+                voice_client.stop()
+
+            voice_client.play(discord.FFmpegPCMAudio(URL, **ffmpeg_options))
+            music_player.add_to_queue(info['title'])
+            await ctx.send(f'Now playing: **{info["title"]}**')
+        except Exception as e:
+            await ctx.send(f"An error occurred while trying to play the song: {str(e)}")
 
 @bot.command(name='queue')
 async def queue(ctx):
@@ -100,6 +112,7 @@ async def skip(ctx):
         await ctx.send("There's no song to skip.")
 
 bot.run('MTMzMzYzOTkwNjg2OTkwMzM2MA.GCxvjx.S7vnJRw7BxrSmfbfZGXXgq7-5yBbt9SSv32JEM')
+
 
 
 keep_alive()
